@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/auth";
 import { money } from "@/lib/money";
 import { Flash } from "@/components/ui";
 import { deleteUserAction } from "@/app/actions/admin";
+import { isRetiredEmail } from "@/lib/simulated";
 import { FOUNDER_BUYER_LIMIT } from "@/lib/money";
 import { resetDemoDataAction } from "@/app/actions/demo";
 import { DEMO_BUYER_EMAIL, DEMO_PUBLISHER_EMAIL, DEMO_SITES } from "@/lib/demo";
@@ -17,7 +18,9 @@ export default async function AdminUsers(
 ) {
   const searchParams = await props.searchParams;
   const me = await requireRole("admin");
-  const users = await prisma.user.findMany({ orderBy: { createdAt: "desc" } });
+  // Deleted simulated accounts kept only for their completed orders are not
+  // people any more, so they are not listed (see lib/simulated.ts).
+  const users = (await prisma.user.findMany({ orderBy: { createdAt: "desc" } })).filter((u) => !isRetiredEmail(u.email));
 
   const publishers = users.filter((u) => u.role === "publisher");
   const buyers = users.filter((u) => u.role === "buyer");

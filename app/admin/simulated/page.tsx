@@ -4,7 +4,7 @@ import { money } from "@/lib/money";
 import { Flash } from "@/components/ui";
 import { simulatedReport } from "@/lib/simulated";
 import { PASSWORD_PATTERN, PASSWORD_RULES } from "@/lib/password";
-import { createSimulatedBuyerAction, creditSimulatedAction } from "@/app/actions/simulated";
+import { createSimulatedBuyerAction, creditSimulatedAction, deleteSimulatedAction } from "@/app/actions/simulated";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Simulated accounts" };
@@ -17,6 +17,9 @@ export default async function AdminSimulated(
   const searchParams = await props.searchParams;
   await requireRole("admin");
   const r = await simulatedReport();
+  // Deleted accounts with completed orders still count in the totals above,
+  // but are not listed: nobody can sign in to them any more.
+  const live = r.rows.filter((a) => !a.retired);
 
   return (
     <div>
@@ -92,11 +95,17 @@ export default async function AdminSimulated(
 
       {/* ---- The accounts ---- */}
       <h2 className="h3 mb-3">Accounts</h2>
-      {r.rows.length === 0 ? (
+      {r.retiredAccounts > 0 && (
+        <p className="muted mb-3 text-xs">
+          The totals above include {r.retiredAccounts} deleted account{r.retiredAccounts === 1 ? "" : "s"},
+          kept on record because {r.retiredAccounts === 1 ? "it has" : "they have"} completed orders.
+        </p>
+      )}
+      {live.length === 0 ? (
         <div className="card muted mb-8">No simulated accounts yet. Create one below.</div>
       ) : (
         <div className="mb-8 grid gap-5">
-          {r.rows.map((a) => (
+          {live.map((a) => (
             <div key={a.id} className="card">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -146,6 +155,41 @@ export default async function AdminSimulated(
               <p className="muted mt-2 text-xs">
                 The 5% service fee comes off, the same as a card deposit.
               </p>
+
+              <details className="mt-4 border-t border-wt-border pt-4">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-white/80">
+                  Delete this account &rarr;
+                </summary>
+                {a.openOrderIds.length > 0 ? (
+                  <p className="muted mt-3 text-sm">
+                    Order{a.openOrderIds.length === 1 ? "" : "s"}{" "}
+                    {a.openOrderIds.map((id, i) => (
+                      <span key={id}>
+                        {i > 0 && ", "}
+                        <Link href={`/orders/${id}`} className="text-wt-green">#{id}</Link>
+                      </span>
+                    ))}{" "}
+                    {a.openOrderIds.length === 1 ? "is" : "are"} still open, so this account cannot be
+                    deleted yet. Wait for {a.openOrderIds.length === 1 ? "it" : "them"} to complete, or
+                    cancel {a.openOrderIds.length === 1 ? "it" : "them"} from the order page.
+                  </p>
+                ) : (
+                  <form action={deleteSimulatedAction} className="mt-3 space-y-3">
+                    <input type="hidden" name="userId" value={a.id} />
+                    <p className="muted text-sm">
+                      {a.completedOrders > 0
+                        ? `The account is removed: it can no longer sign in and ${a.email} is free to use again. Its ${a.completedOrders} completed order${a.completedOrders === 1 ? " stays" : "s stay"} on record, so the publishers' earnings and the totals above do not change.`
+                        : "The account is deleted with its history. Nothing real was bought on it."}
+                      {a.balanceCents > 0 ? ` The unspent ${money(a.balanceCents)} balance is cleared.` : ""}
+                    </p>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="confirm" value="yes" required />
+                      Yes, delete {a.name}
+                    </label>
+                    <button className="btn-danger btn-sm" type="submit">Delete account</button>
+                  </form>
+                )}
+              </details>
             </div>
           ))}
         </div>

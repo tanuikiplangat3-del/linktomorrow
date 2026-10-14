@@ -10,9 +10,9 @@ import { hasRequesterRate } from "@/lib/requester";
 import { isContentType } from "@/lib/data";
 import { audit, formSummary } from "@/lib/audit";
 import { safeHttpUrl, IMAGE_TYPES, DOCUMENT_TYPES } from "@/lib/safe-url";
-import { escHtml } from "@/lib/email";
 import { createCheckout, stripeEnabled } from "@/lib/stripe";
-import { emailEnabled, sendOrderNotice, sendNewOrderEmails, sendLiveUrlAdmin, sendOrderConfirmedEmails, sendOrderCancelledEmails } from "@/lib/email";
+import { emailEnabled, sendOrderNotice, sendLiveUrlAdmin, sendOrderConfirmedEmails, sendOrderCancelledEmails } from "@/lib/email";
+import { confirmReceiptStep, submitLiveStep, notifyNewOrder } from "@/lib/order-steps";
 import {
   cancelFundedOrder,
   dueAtFrom,
@@ -161,7 +161,13 @@ export async function payFromWalletAction(formData: FormData) {
   });
   if (funded === "gone") redirect(`/orders/${orderId}?error=${q("That order has already been paid for or cancelled.")}`);
   if (funded === "broke") redirect(`/orders/${orderId}?error=${q("Not enough wallet balance - another payment may have just gone through. Top up or pay by card.")}`);
-  await notifyPublisherFunded(orderId);
+  // The money has moved. A mail failure must not show the buyer an error page
+  // for a payment that went through.
+  try {
+    await notifyNewOrder(orderId);
+  } catch (e: any) {
+    console.error(`[orders] new-order emails for #${orderId} failed: ${e?.message || e}`);
+  }
   revalidatePath("/orders");
   redirect(`/orders/${orderId}?success=${q("Order funded from your balance.")}`);
 }
@@ -203,42 +209,15 @@ export async function payWithStripeAction(formData: FormData) {
 export async function submitLiveAction(formData: FormData) {
   const user = await requireRole("publisher");
   const orderId = parseInt(String(formData.get("orderId") || "0"));
-  // Only real http(s) links are ever stored: they are shown as links to the
-  // buyer and the admin, and put into emails.
-  const liveUrl = safeHttpUrl(formData.get("liveUrl")) || "";
-  const invoiceUrl = safeHttpUrl(formData.get("invoiceUrl")) || "";
-  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { listing: true, buyer: true } });
-  if (!order || order.listing.publisherId !== user.id) redirect(`/orders?error=${q("Not your order.")}`);
-  if (!["funded", "in_progress"].includes(order!.status))
-    redirect(`/orders/${orderId}?error=${q("Confirm you received the order first.")}`);
-  if (!/^https?:\/\//.test(liveUrl)) redirect(`/orders/${orderId}?error=${q("Enter a valid live URL.")}`);
-
-  const me = await prisma.user.findUnique({ where: { id: user.id }, select: { payInvoiceMode: true } });
-  if (me?.payInvoiceMode && !/^https?:\/\//.test(invoiceUrl)) {
-    redirect(`/orders/${orderId}?error=${q("Add the link to your invoice. You chose to invoice for each placement rather than save payment details.")}`);
-  }
-
-  // Delivered. Clear the deadline so the sweeper can never cancel an order
-  // whose link is already up and waiting on the buyer to look at it.
-  //
-  // Guarded on the order still being in flight: the sweeper may have cancelled
-  // and refunded it in the moments since the page was loaded, and an unguarded
-  // update would put a refunded order back on the publisher-payment queue.
-  const moved = await prisma.order.updateMany({
-    where: { id: orderId, status: { in: ["funded", "in_progress"] } },
-    data: { status: "live", liveUrl, dueAt: null, invoiceUrl: invoiceUrl || null },
-  });
-  if (moved.count === 0) {
-    redirect(`/orders/${orderId}?error=${q("This order is no longer open - it was cancelled or already completed. Please contact us before publishing anything further.")}`);
-  }
-  if (emailEnabled()) {
-    if (order!.buyer) {
-      await sendOrderNotice(order!.buyer.email, "Your link is live", `The publisher submitted the live URL for order #${orderId}: ${escHtml(liveUrl)}. Please confirm in your dashboard.`);
-    }
-    await sendLiveUrlAdmin(orderId, order!.listing.domain, liveUrl);
+  // The checks, the guarded write and the emails are shared with the emailed
+  // link (app/actions/order-links.ts) so both doors behave the same.
+  const res = await submitLiveStep(orderId, user.id, formData.get("liveUrl"), formData.get("invoiceUrl"));
+  if (!res.ok) {
+    if (res.error === "Not your order.") redirect(`/orders?error=${q(res.error)}`);
+    redirect(`/orders/${orderId}?error=${q(res.error)}`);
   }
   revalidatePath("/orders");
-  redirect(`/orders/${orderId}?success=${q("Live URL submitted. Waiting for buyer confirmation.")}`);
+  redirect(`/orders/${orderId}?success=${q(res.message)}`);
 }
 
 /**
@@ -271,7 +250,7 @@ export async function buyerSubmitLiveAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=${q("This order is no longer open - it was cancelled or already completed.")}`);
   }
   if (emailEnabled()) {
-    await sendLiveUrlAdmin(orderId, order!.listing.domain, liveUrl);
+    await sendLiveUrlAdmin(orderId, order!.listing.domain, liveUrl, true);
   }
   await notifyOrderConfirmed(orderId);
   revalidatePath("/orders");
@@ -464,49 +443,16 @@ async function notifyOrderConfirmed(orderId: number) {
   }
 }
 
-async function notifyPublisherFunded(orderId: number) {
-  if (!emailEnabled()) return;
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: { listing: { include: { publisher: true } }, buyer: true },
-  });
-  const pub = order?.listing.publisher;
-  if (pub) {
-    await sendNewOrderEmails({
-      publisherEmail: pub.email,
-      domain: order!.listing.domain,
-      orderId,
-      buyerName: order!.buyer?.name,
-      contentType: order!.contentType,
-    });
-  }
-}
-
 /** Publisher confirms they received the order -> status moves to in progress. */
 export async function confirmReceiptAction(formData: FormData) {
   const user = await requireRole("publisher");
   const orderId = parseInt(String(formData.get("orderId") || "0"));
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: { listing: true, buyer: true },
-  });
-  if (!order || order.listing.publisherId !== user.id) redirect(`/orders?error=${q("Not your order.")}`);
-  if (order!.status !== "funded") redirect(`/orders/${orderId}?error=${q("This order can't be confirmed.")}`);
-
-  // Guarded, for the same reason as submitLiveAction: an unguarded write here
-  // could drag an order the sweeper had just cancelled and refunded back into
-  // an in-flight status, where the next sweep would refund the buyer a second
-  // time.
-  const started = await prisma.order.updateMany({
-    where: { id: orderId, status: "funded" },
-    data: { status: "in_progress" },
-  });
-  if (started.count === 0) {
-    redirect(`/orders/${orderId}?error=${q("This order is no longer open - it was cancelled or already moved on.")}`);
-  }
-  if (emailEnabled() && order!.buyer) {
-    await sendOrderNotice(order!.buyer.email, "Your order is in progress", `The publisher has confirmed your order #${orderId} on ${order!.listing.domain} and started work. You'll be notified when the link is live.`);
+  // Shared with the emailed link, see submitLiveAction.
+  const res = await confirmReceiptStep(orderId, user.id);
+  if (!res.ok) {
+    if (res.error === "Not your order.") redirect(`/orders?error=${q(res.error)}`);
+    redirect(`/orders/${orderId}?error=${q(res.error)}`);
   }
   revalidatePath("/orders");
-  redirect(`/orders/${orderId}?success=${q("Order confirmed. It is now in progress.")}`);
+  redirect(`/orders/${orderId}?success=${q(res.message)}`);
 }

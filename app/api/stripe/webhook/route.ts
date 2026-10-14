@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
-import { emailEnabled, sendNewOrderEmails, sendDepositReceipt, sendDepositAdmin } from "@/lib/email";
+import { emailEnabled, sendDepositReceipt, sendDepositAdmin } from "@/lib/email";
+import { notifyNewOrder } from "@/lib/order-steps";
 import { netDeposit } from "@/lib/money";
 import { dueAtFrom } from "@/lib/orders";
 import { MARKUP_REQUESTED } from "@/lib/money";
@@ -119,27 +120,10 @@ export async function POST(req: NextRequest) {
             // Same reasoning as the deposit branch: the order is funded, so a
             // notification failure must never bubble up and cost us the emails.
             try {
-              if (emailEnabled()) {
-                const full = await prisma.order.findUnique({
-                  where: { id: tx.orderId },
-                  include: { listing: { include: { publisher: true } }, buyer: true },
-                });
-                const pub = full?.listing.publisher;
-                // Use the same helper the wallet path uses, so a card-funded order
-                // notifies BOTH the publisher and the admin desk. Previously this
-                // branch told only the publisher, so admins missed card orders.
-                if (pub) {
-                  await sendNewOrderEmails({
-                    publisherEmail: pub.email,
-                    domain: full!.listing.domain,
-                    orderId: tx.orderId,
-                    buyerName: full!.buyer?.name,
-                    contentType: full!.contentType,
-                  });
-                } else {
-                  console.error(`[stripe-webhook] order ${tx.orderId} has no publisher - no order emails sent.`);
-                }
-              }
+              // The same helper the wallet path uses, so a card-funded order
+              // notifies BOTH the publisher and the admin desk, with the same
+              // download and confirm links.
+              await notifyNewOrder(tx.orderId);
             } catch (e: any) {
               console.error(`[stripe-webhook] order emails failed for order ${tx.orderId}: ${e?.message || e}`);
             }

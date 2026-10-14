@@ -1,3 +1,4 @@
+import { RETIRED_EMAIL_DOMAIN } from "@/lib/simulated";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
@@ -22,7 +23,7 @@ export default async function AdminHome(
   ]);
   const siteRequests = await prisma.siteRequest.count({ where: { status: "pending" } });
   const conflicts = await countConflicts();
-  const simulated = await prisma.user.count({ where: { isSimulated: true } });
+  const simulated = await prisma.user.count({ where: { isSimulated: true, NOT: { email: { endsWith: RETIRED_EMAIL_DOMAIN } } } });
   const payoutReviews = await prisma.user.count({ where: { role: "publisher", payStatus: "pending" } });
   const withdrawals = await prisma.withdrawal.count({ where: { status: "pending" } });
   const auditToday = await prisma.adminAudit.count({ where: { createdAt: { gte: new Date(Date.now() - 86400_000) } } });

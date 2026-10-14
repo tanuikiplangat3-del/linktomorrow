@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole, hashPassword } from "@/lib/auth";
 import { passwordProblem } from "@/lib/password";
 import { centsFromUsd, money } from "@/lib/money";
-import { splitCredit } from "@/lib/simulated";
+import { splitCredit, removeSimulatedAccount, simulatedRemoveRedirect } from "@/lib/simulated";
 
 const q = (s: string) => encodeURIComponent(s);
 const back = "/admin/simulated";
@@ -136,4 +136,22 @@ async function creditSimulated(userId: number, grossCents: number, note: string,
     }),
   ]);
   return split;
+}
+
+/**
+ * Delete a simulated account. The rules (refuse with open orders, delete
+ * outright when nothing real was bought, otherwise keep the orders and remove
+ * the person) live in lib/simulated.ts, shared with Admin -> Users -> Delete.
+ */
+export async function deleteSimulatedAction(formData: FormData) {
+  const admin = await requireRole("admin");
+  await audit(admin, "deleteSimulatedAction", null, formSummary(formData));
+  const userId = parseInt(String(formData.get("userId") || "0")) || 0;
+  if (formData.get("confirm") !== "yes") {
+    redirect(`${back}?error=${q("Tick the box to confirm you want to delete this account.")}`);
+  }
+  const res = await removeSimulatedAccount(userId);
+  revalidatePath(back);
+  revalidatePath("/admin/users");
+  redirect(simulatedRemoveRedirect(back, res));
 }
