@@ -29,6 +29,8 @@ export const LIMITS = {
   contactPerIp: { max: 5, windowSeconds: 60 * 60 },
   applyPerIp: { max: 5, windowSeconds: 60 * 60 },
   publisherLinkPerBuyer: { max: 20, windowSeconds: 24 * 60 * 60 },
+  // Emailed order links (no sign-in): file downloads and the two publisher steps.
+  orderLinkPerIp: { max: 60, windowSeconds: 60 * 60 },
 } satisfies Record<string, Limit>;
 
 export const TOO_MANY = "Too many attempts. Please wait a while and try again.";

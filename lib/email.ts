@@ -1,5 +1,7 @@
 import { Resend } from "resend";
 import { money } from "./money";
+import { safeHttpUrl } from "./safe-url";
+import { orderPageUrl } from "./app-url";
 
 const key = process.env.RESEND_API_KEY || "";
 const from = process.env.MAIL_FROM || "Welcome Tomorrow <seo@welcometomorrow.io>";
@@ -173,25 +175,105 @@ export function sendDepositReceipt(to: string, grossCents: number, netCents: num
   );
 }
 
-/** New paid order -> notify the publisher AND the admin desk so both can act. */
+/** Download links for an order's files; absent when the order has no such file. */
+export type OrderFileLinks = { doc?: string; image?: string; text?: string };
+
+/** A green pill button, with the full address shown underneath (deliverability rule). */
+function button(href: string, label: string): string {
+  return `<p style="margin:20px 0 6px"><a href="${esc(href)}" style="display:inline-block;background:#0aa865;color:#fff;padding:14px 28px;border-radius:30px;text-decoration:none;font-weight:700">${esc(label)}</a></p>`;
+}
+
+function fullLink(href: string, intro = "Or paste this address into your browser:"): string {
+  return `<p style="color:rgba(255,255,255,.6);font-size:13px;margin:0 0 16px">${esc(intro)}<br>
+          <a href="${esc(href)}" style="color:#0aa865;word-break:break-all">${esc(href)}</a></p>`;
+}
+
+/** A plain download link, one per line. */
+function downloadLine(href: string, label: string): string {
+  return `<a href="${esc(href)}" style="color:#0aa865;font-weight:600">&#11015; ${esc(label)}</a>`;
+}
+
+/** The order brief as label/value rows. Values are escaped; the target URL is only linked if safe. */
+function briefRows(input: { targetUrl?: string | null; anchorText?: string | null; notes?: string | null }): string {
+  const rows: string[] = [];
+  const target = safeHttpUrl(input.targetUrl);
+  if (input.targetUrl) {
+    rows.push(
+      `<strong>Target URL:</strong> ${
+        target ? `<a href="${esc(target)}" style="color:#0aa865;word-break:break-all">${esc(target)}</a>` : esc(input.targetUrl)
+      }`
+    );
+  }
+  if (input.anchorText) rows.push(`<strong>Anchor text:</strong> ${esc(input.anchorText)}`);
+  if (input.notes) rows.push(`<strong>Notes from the buyer:</strong> ${esc(input.notes)}`);
+  return rows.length ? `<p>${rows.join("<br>")}</p>` : "";
+}
+
+const longDate = (d: Date) =>
+  d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+/**
+ * New paid order -> the publisher and the admin desk.
+ *
+ * The publisher's copy carries everything needed to do the job without signing
+ * in (8 Oct 2026): the brief, a download link for each file the buyer sent, and
+ * a signed link to a page where one press confirms receipt and, later, the live
+ * URL is submitted. The admin copy gets the same brief and downloads.
+ */
 export async function sendNewOrderEmails(input: {
-  publisherEmail: string;
-  domain: string;
   orderId: number;
-  buyerName?: string;
+  domain: string;
   contentType?: string;
+  buyerName?: string;
+  publisherEmail: string;
+  payoutCents: number;
+  turnaroundDays: number;
+  dueAt?: Date | null;
+  targetUrl?: string | null;
+  anchorText?: string | null;
+  notes?: string | null;
+  /** The publisher's no-sign-in page, or null for sites with no publisher account. */
+  deskUrl: string | null;
+  docName: string | null;
+  /** Signed download links. Built by lib/order-steps.ts, never here. */
+  publisherFiles: OrderFileLinks;
+  adminFiles: OrderFileLinks;
 }) {
   const { publisherEmail, domain, orderId } = input;
   const kind = input.contentType === "pr_article" ? "PR article" : "guest post";
-  await send(
-    publisherEmail,
-    `New order on ${domain}`,
-    wrap(
-      "You have a new order",
-      `<p>You have received a new order (#${orderId}) for a <strong>${kind}</strong> on <strong>${esc(domain)}</strong>.</p>
-       <p>Sign in to your dashboard, open <strong>Orders</strong>, confirm you received it, then publish the link and submit the live URL.</p>`
-    )
-  );
+  const brief = briefRows(input);
+  const deadline = input.dueAt
+    ? `Please publish within <strong>${input.turnaroundDays} days</strong>, by <strong>${longDate(input.dueAt)}</strong>.`
+    : "";
+
+  const downloads = (f: OrderFileLinks) => {
+    const lines: string[] = [];
+    if (f.doc) lines.push(downloadLine(f.doc, `Download the article (${input.docName || "document"})`));
+    if (f.image) lines.push(downloadLine(f.image, "Download the featured image"));
+    if (f.text) lines.push(downloadLine(f.text, "Download the article text the buyer pasted (.txt)"));
+    return lines.length
+      ? `<p style="line-height:2">${lines.join("<br>")}</p>`
+      : `<p style="color:rgba(255,255,255,.6)">The buyer did not attach a file. Everything they sent is in the brief above.</p>`;
+  };
+
+  let publisherBody: string;
+  if (input.deskUrl) {
+    const desk = input.deskUrl;
+    publisherBody = `<p>You have a new order (#${orderId}) for a <strong>${kind}</strong> on <strong>${esc(domain)}</strong>.
+          Your payout is <strong>${money(input.payoutCents)}</strong>. ${deadline}</p>
+       ${brief}
+       ${downloads(input.publisherFiles)}
+       <p>Please confirm you have received this order. It opens a page for this order and takes one press. No sign-in needed.</p>
+       ${button(desk, "Confirm receipt")}
+       ${fullLink(desk)}
+       <p>When the article is published, open the same link and paste the live URL. The buyer and our team are told straight away.</p>
+       <p style="color:rgba(255,255,255,.6);font-size:13px">This link is for you only and works for 30 days. Anyone holding it can act on this order, so please do not forward it. You can also do all of this from <strong>Orders</strong> when signed in.</p>`;
+  } else {
+    publisherBody = `<p>You have received a new order (#${orderId}) for a <strong>${kind}</strong> on <strong>${esc(domain)}</strong>.</p>
+       <p>Sign in to your dashboard, open <strong>Orders</strong>, confirm you received it, then publish the link and submit the live URL.</p>`;
+  }
+  await send(publisherEmail, `New order on ${domain}`, wrap("You have a new order", publisherBody));
+
   await send(
     ADMIN_NOTIFY,
     `New order #${orderId} on ${domain}`,
@@ -200,7 +282,28 @@ export async function sendNewOrderEmails(input: {
       `<p>A new ${kind} order (#${orderId}) was placed on <strong>${esc(domain)}</strong>${
         input.buyerName ? ` by ${esc(input.buyerName)}` : ""
       }.</p>
-       <p>Follow up from the admin Orders page.</p>`
+       ${brief}
+       ${downloads(input.adminFiles)}
+       ${button(orderPageUrl(orderId), "Open the order")}
+       <p style="color:rgba(255,255,255,.6);font-size:13px">The publisher has been emailed a link to confirm receipt and submit the live URL without signing in.</p>`
+    )
+  );
+}
+
+/** The publisher submitted the live URL -> the buyer, with the link to check. */
+export function sendLiveUrlBuyer(input: { to: string; orderId: number; domain: string; liveUrl: string }) {
+  const live = safeHttpUrl(input.liveUrl);
+  return send(
+    input.to,
+    `Your link is live on ${input.domain} (order #${input.orderId})`,
+    wrap(
+      "Your link is live",
+      `<p>The publisher has published your article on <strong>${esc(input.domain)}</strong> for order
+          <strong>#${input.orderId}</strong>. Here is the live page:</p>
+       <p>${live ? `<a href="${esc(live)}" style="color:#0aa865;font-weight:600;word-break:break-all">${esc(live)}</a>` : esc(input.liveUrl)}</p>
+       <p>Please check it, then confirm on your order page so we can complete the order and pay the publisher.</p>
+       ${button(orderPageUrl(input.orderId), "Check and confirm")}
+       ${fullLink(orderPageUrl(input.orderId))}`
     )
   );
 }
@@ -235,7 +338,7 @@ export async function sendOrderConfirmedEmails(input: {
     wrap(
       "Order confirmed",
       `<p>The buyer confirmed order <strong>#${orderId}</strong> on <strong>${esc(domain)}</strong> is live.</p>
-       <p>Publisher payout: <strong>${money(payoutCents)}</strong> to ${esc(publisherEmail)}.</p>
+       <p>Publisher payout: <strong>${money(payoutCents)}</strong>.</p>
        <p>This is now ready for the publisher to withdraw. You will get a separate email when they
           ask, and you pay it from the admin Withdrawals page.</p>`
     )
@@ -371,16 +474,22 @@ export function sendAdminInviteEmail(to: string, link: string) {
   );
 }
 
-/** Publisher submitted a live URL -> notify the admin desk. */
-export function sendLiveUrlAdmin(orderId: number, domain: string, liveUrl: string) {
+/** Publisher (or the buyer, on a requested site) submitted a live URL -> notify the admin desk. */
+export function sendLiveUrlAdmin(orderId: number, domain: string, liveUrl: string, byBuyer = false) {
+  const live = safeHttpUrl(liveUrl);
   return send(
     ADMIN_NOTIFY,
     `Link went live on ${domain} (order #${orderId})`,
     wrap(
       "A link just went live",
-      `<p>The publisher submitted the live URL for order <strong>#${orderId}</strong> on <strong>${esc(domain)}</strong>.</p>
-       <p><a href="${esc(liveUrl)}" style="color:#0aa865">${esc(liveUrl)}</a></p>
-       <p>The buyer has been asked to confirm. Once complete, pay the publisher from the admin Orders page.</p>`
+      `<p>The live URL for order <strong>#${orderId}</strong> on <strong>${esc(domain)}</strong> is in:</p>
+       <p>${live ? `<a href="${esc(live)}" style="color:#0aa865;font-weight:600;word-break:break-all">${esc(live)}</a>` : esc(liveUrl)}</p>
+       <p>${
+         byBuyer
+           ? "The buyer arranged this site themselves and has confirmed the placement, so the order is complete. Pay the publisher within 72 hours."
+           : "The buyer has been emailed the link and asked to confirm. Once complete, the publisher can withdraw."
+       }</p>
+       ${button(orderPageUrl(orderId), "Open the order")}`
     )
   );
 }
