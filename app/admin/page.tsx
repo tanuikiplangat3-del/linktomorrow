@@ -26,6 +26,7 @@ export default async function AdminHome(
   const simulated = await prisma.user.count({ where: { isSimulated: true, NOT: { email: { endsWith: RETIRED_EMAIL_DOMAIN } } } });
   const payoutReviews = await prisma.user.count({ where: { role: "publisher", payStatus: "pending" } });
   const withdrawals = await prisma.withdrawal.count({ where: { status: "pending" } });
+  const buyerApprovals = await prisma.user.count({ where: { role: "buyer", approvalStatus: "pending" } });
   const auditToday = await prisma.adminAudit.count({ where: { createdAt: { gte: new Date(Date.now() - 86400_000) } } });
 
   const cards = [
@@ -34,6 +35,7 @@ export default async function AdminHome(
     { href: "/admin/orders", label: "Orders", value: orders, hint: `${funded} funded` },
     { href: "/admin/site-requests", label: "Site requests", value: siteRequests, hint: "awaiting review" },
     { href: "/admin/invites", label: "Publisher invites", value: invites, hint: "open" },
+    { href: "/admin/users", label: "Buyer approvals", value: buyerApprovals, hint: "waiting to sign in" },
     { href: "/admin/users", label: "Users", value: users, hint: `${publishers} publishers` },
     { href: "/admin/simulated", label: "Simulated accounts", value: simulated, hint: "our own buyers" },
     { href: "/admin/withdrawals", label: "Withdrawals", value: withdrawals, hint: "to pay" },

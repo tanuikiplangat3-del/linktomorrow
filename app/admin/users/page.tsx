@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { money } from "@/lib/money";
 import { Flash } from "@/components/ui";
-import { deleteUserAction } from "@/app/actions/admin";
+import { deleteUserAction, approveBuyerAction, rejectBuyerAction } from "@/app/actions/admin";
 import { isRetiredEmail } from "@/lib/simulated";
 import { FOUNDER_BUYER_LIMIT } from "@/lib/money";
 import { resetDemoDataAction } from "@/app/actions/demo";
@@ -23,7 +23,12 @@ export default async function AdminUsers(
   const users = (await prisma.user.findMany({ orderBy: { createdAt: "desc" } })).filter((u) => !isRetiredEmail(u.email));
 
   const publishers = users.filter((u) => u.role === "publisher");
-  const buyers = users.filter((u) => u.role === "buyer");
+  // Buyers who signed up and are waiting for an admin. They cannot sign in
+  // until approved here. Confirmed emails first: those are the real queue.
+  const awaiting = users
+    .filter((u) => u.role === "buyer" && u.approvalStatus === "pending")
+    .sort((a, b) => Number(b.verified) - Number(a.verified));
+  const buyers = users.filter((u) => u.role === "buyer" && u.approvalStatus !== "pending");
   const admins = users.filter((u) => u.role === "admin");
   const founders = users.filter((u) => u.founderNumber !== null).length;
   const demoReady = users.some((u) => u.email === DEMO_BUYER_EMAIL) && users.some((u) => u.email === DEMO_PUBLISHER_EMAIL);
@@ -40,6 +45,14 @@ export default async function AdminUsers(
         for life.
       </p>
       <Flash searchParams={searchParams} />
+
+      <Section title="Buyers awaiting approval" count={awaiting.length}>
+        <p className="muted mb-3 text-sm">
+          New buyers cannot sign in until you approve them. Approving emails them that they can
+          sign in. Rejecting keeps the account, so you can still approve it later.
+        </p>
+        <ApprovalTable users={awaiting} />
+      </Section>
 
       <div className="card mb-8 border-wt-yellow/40">
         <h2 className="h3 mb-1">Demo accounts</h2>
@@ -125,6 +138,7 @@ function UserTable({
                   u.name
                 )}
                 {u.isDemo && <span className="badge badge-yellow ml-2">demo</span>}
+                {u.approvalStatus === "rejected" && <span className="badge badge-red ml-2">rejected</span>}
               </td>
               <td className="muted">{u.email}</td>
               {kind === "buyer" && <td>{money(u.balanceCents)}</td>}
@@ -147,12 +161,57 @@ function UserTable({
               <td>{u.verified ? "✓" : "-"}</td>
               <td className="muted">{u.createdAt.toISOString().slice(0, 10)}</td>
               <td className="text-right">
-                {u.id !== meId && (
-                  <form action={deleteUserAction}>
+                <div className="flex justify-end gap-2">
+                  {u.approvalStatus === "rejected" && (
+                    <form action={approveBuyerAction}>
+                      <input type="hidden" name="id" value={u.id} />
+                      <button type="submit" className="btn-primary btn-sm">Approve</button>
+                    </form>
+                  )}
+                  {u.id !== meId && (
+                    <form action={deleteUserAction}>
+                      <input type="hidden" name="id" value={u.id} />
+                      <button type="submit" className="btn-danger btn-sm">Delete</button>
+                    </form>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ApprovalTable({ users }: { users: any[] }) {
+  if (users.length === 0) return <div className="card muted">Nobody is waiting.</div>;
+  return (
+    <div className="card overflow-x-auto">
+      <table className="table-wt">
+        <thead>
+          <tr>
+            <th>Name</th><th>Email</th><th>Email confirmed</th><th>Signed up</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((u) => (
+            <tr key={u.id}>
+              <td className="font-semibold">{u.name}</td>
+              <td className="muted">{u.email}</td>
+              <td>{u.verified ? "\u2713" : <span className="muted">Not yet</span>}</td>
+              <td className="muted">{u.createdAt.toISOString().slice(0, 10)}</td>
+              <td className="text-right">
+                <div className="flex justify-end gap-2">
+                  <form action={approveBuyerAction}>
                     <input type="hidden" name="id" value={u.id} />
-                    <button type="submit" className="btn-danger btn-sm">Delete</button>
+                    <button type="submit" className="btn-primary btn-sm">Approve</button>
                   </form>
-                )}
+                  <form action={rejectBuyerAction}>
+                    <input type="hidden" name="id" value={u.id} />
+                    <button type="submit" className="btn-danger btn-sm">Reject</button>
+                  </form>
+                </div>
               </td>
             </tr>
           ))}

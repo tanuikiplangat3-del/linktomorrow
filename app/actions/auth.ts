@@ -91,16 +91,15 @@ export async function registerAction(formData: FormData) {
       passwordHash: await hashPassword(password),
       role: "buyer", // hard-coded: public signup can never create publisher/admin
       verified: !emailEnabled(),
+      // Every public sign-up waits for an admin. No session is ever created
+      // here: the buyer sees nothing until Admin -> Users approves them.
+      approvalStatus: "pending",
     },
   });
 
-  // The founding slot is awarded at email CONFIRMATION, not here. There are
-  // only ten, they last for life, and they cannot be recovered from a deleted
-  // account - so ten throwaway addresses must not be able to burn the lot
-  // before a single real buyer arrives. See verifyCodeAction below.
-
-  // Let the admin desk know a new buyer joined (best-effort).
-  await sendBuyerSignupAdmin(name, email);
+  // The founding slot is awarded at ADMIN APPROVAL (approveBuyerAction), not
+  // here and no longer at email confirmation. There are only ten, they last for
+  // life, and an account nobody has approved is not a real buyer yet.
 
   if (emailEnabled()) {
     const sent = await issueVerificationCode(user.id, email);
@@ -108,19 +107,25 @@ export async function registerAction(formData: FormData) {
       redirect(`/verify-email?email=${q(email)}&success=${q("We sent a 6-digit code to " + email + ".")}`);
     }
     // The email could not be delivered (e.g. the sending domain isn't verified in
-    // Resend yet). Never strand the buyer: activate the account and sign them in.
+    // Resend yet). Never strand the buyer: confirm the address, then they wait
+    // for approval like everyone else.
     await prisma.user.update({ where: { id: user.id }, data: { verified: true } });
     await prisma.emailVerification.deleteMany({ where: { userId: user.id } });
-    // Verified by this route rather than by a code, so award the slot here too.
-    await claimFounderSlot(user.id);
-    await createSession(user.id);
-    redirect(`/dashboard?success=${q("Welcome! Your account is ready.")}`);
   }
 
-  // Email sending is off entirely, so the account was created verified.
-  await claimFounderSlot(user.id);
-  await createSession(user.id);
-  redirect("/dashboard");
+  // Email confirmed by one of the routes above: tell the admin desk there is
+  // someone to approve, and show the buyer the "waiting for approval" pop-up.
+  await notifyAwaitingApproval(name, email);
+  redirect(`/login?notice=awaiting`);
+}
+
+/** Let the admin desk know a buyer has confirmed their email and needs approving (best-effort). */
+async function notifyAwaitingApproval(name: string, email: string) {
+  try {
+    await sendBuyerSignupAdmin(name, email, `${appUrl()}/admin/users`);
+  } catch (e: any) {
+    console.error(`[auth] could not send buyer-approval notice: ${e?.message || e}`);
+  }
 }
 
 export async function loginAction(formData: FormData) {
@@ -150,7 +155,11 @@ export async function loginAction(formData: FormData) {
       `/verify-email?email=${q(user!.email)}&success=${q("Please confirm your email. We sent a new 6-digit code to " + user!.email + ".")}`
     );
   }
-  await createSession(user.id);
+  // Right password, but an admin has not approved this account. Shown only
+  // after the password is checked, so it never reveals who is registered.
+  if (user!.approvalStatus === "rejected") redirect(`/login?notice=rejected`);
+  if (user!.approvalStatus !== "approved") redirect(`/login?notice=not-approved`);
+  await createSession(user!.id);
   redirect("/dashboard");
 }
 
@@ -194,8 +203,15 @@ export async function verifyCodeAction(formData: FormData) {
   await prisma.user.update({ where: { id: user!.id }, data: { verified: true } });
   await prisma.emailVerification.deleteMany({ where: { userId: user!.id } });
 
-  // A confirmed buyer is a real one, so this is where a founding slot is
-  // awarded. Buyers only - an admin or publisher never takes one. Awarded
+  // A new buyer now waits for an admin. No session: they see nothing until
+  // approved, and the founding slot is awarded at approval instead.
+  if (user!.approvalStatus !== "approved") {
+    await notifyAwaitingApproval(user!.name, user!.email);
+    redirect(`/login?notice=awaiting`);
+  }
+
+  // An account approved before it was confirmed (or from before approvals
+  // existed). Buyers only - an admin or publisher never takes a slot. Awarded
   // silently: the buyer is never told the perk exists or that there is a limit.
   if (user!.role === "buyer") await claimFounderSlot(user!.id);
 
@@ -219,6 +235,10 @@ export async function resendCodeAction(formData: FormData) {
     await prisma.user.update({ where: { id: user!.id }, data: { verified: true } });
     // Verified here rather than by a code, so this is where the founding slot
     // is awarded on this path. Every route that flips `verified` must claim.
+    if (user!.approvalStatus !== "approved") {
+      await notifyAwaitingApproval(user!.name, user!.email);
+      redirect(`/login?notice=awaiting`);
+    }
     if (user!.role === "buyer") await claimFounderSlot(user!.id);
     redirect(`/login?success=${q("Email sending is off, so your account was activated. Please sign in.")}`);
   }

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/auth";
+import { requireRole, revokeAllSessions } from "@/lib/auth";
 import { audit, formSummary } from "@/lib/audit";
 import { appUrl } from "@/lib/stripe";
 import {
@@ -14,8 +14,10 @@ import {
   sendAdminInviteEmail,
   sendPublisherPaid,
   sendTestEmail,
+  sendBuyerApproved,
   ADMIN_NOTIFY,
 } from "@/lib/email";
+import { claimFounderSlot } from "@/lib/founders";
 import { ahrefsEnabled } from "@/lib/ahrefs";
 import { refreshDueMetrics } from "@/lib/metrics";
 import { normalizeCountry } from "@/lib/data";
@@ -324,6 +326,61 @@ export async function deleteUserAction(formData: FormData) {
       (demoted ? ` ${demoted} site(s) they had introduced now use standard pricing.` : "")
     )}`
   );
+}
+
+/**
+ * Approve a buyer who signed up on the public form. Until this runs they cannot
+ * sign in (loginAction and getCurrentUser both refuse them). Also used to undo
+ * a rejection.
+ */
+export async function approveBuyerAction(formData: FormData) {
+  const me = await requireRole("admin");
+  await audit(me, "approveBuyerAction", null, formSummary(formData));
+  const id = parseInt(String(formData.get("id") || "0"));
+  // Guarded write: only a buyer who is not approved yet, so a double press
+  // sends one email, not two.
+  const res = await prisma.user.updateMany({
+    where: { id, role: "buyer", NOT: { approvalStatus: "approved" } },
+    data: { approvalStatus: "approved" },
+  });
+  if (res.count !== 1) redirect(`/admin/users?error=${q("That buyer is already approved or no longer exists.")}`);
+  const user = await prisma.user.findUnique({ where: { id } });
+  // An approved buyer is a real one, so this is where a founding slot is
+  // awarded (silently, as before).
+  await claimFounderSlot(id);
+  let mailed = false;
+  if (emailEnabled() && user && !user.isDemo) {
+    try {
+      mailed = await sendBuyerApproved(user.email, user.name, `${appUrl()}/login`);
+    } catch (e: any) {
+      console.error(`[admin] could not send buyer-approved email: ${e?.message || e}`);
+    }
+  }
+  revalidatePath("/admin/users");
+  revalidatePath("/admin");
+  redirect(
+    `/admin/users?success=${q(
+      "Approved " + (user?.email || "the buyer") + "." + (mailed ? " They have been emailed that they can sign in." : " No email was sent, so let them know they can sign in.")
+    )}`
+  );
+}
+
+/** Refuse a buyer. They keep seeing "not approved" on sign-in; nothing is deleted, so it can be undone. */
+export async function rejectBuyerAction(formData: FormData) {
+  const me = await requireRole("admin");
+  await audit(me, "rejectBuyerAction", null, formSummary(formData));
+  const id = parseInt(String(formData.get("id") || "0"));
+  const res = await prisma.user.updateMany({
+    where: { id, role: "buyer", NOT: { approvalStatus: "rejected" } },
+    data: { approvalStatus: "rejected" },
+  });
+  if (res.count !== 1) redirect(`/admin/users?error=${q("That buyer is already rejected or no longer exists.")}`);
+  // Ends any session they might hold, on every device.
+  await revokeAllSessions(id);
+  const user = await prisma.user.findUnique({ where: { id }, select: { email: true } });
+  revalidatePath("/admin/users");
+  revalidatePath("/admin");
+  redirect(`/admin/users?success=${q("Rejected " + (user?.email || "the buyer") + ". They cannot sign in. Approve them later to undo this.")}`);
 }
 
 /** Approve a publisher request: create an invite and email them the sign-up link. */
