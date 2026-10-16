@@ -68,6 +68,11 @@ model User {
   // Every session token carries this number. Bumping it ends every session
   // the user has, on every device: sign-out and password reset both do.
   sessionVersion Int      @default(0)
+  // BUYER APPROVAL. A buyer who signs up on the public form is "pending" and
+  // cannot sign in until an admin approves them on Admin -> Users. The default
+  // is "approved" so every other account (publishers, admins, simulated, demo,
+  // and every buyer from before this column existed) is unaffected.
+  approvalStatus String   @default("approved") // approved | pending | rejected
   createdAt      DateTime @default(now())
 
   listings  Listing[]

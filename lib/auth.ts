@@ -94,6 +94,9 @@ export async function getCurrentUser(): Promise<User | null> {
     // Tokens from before revocable sessions carry no version, and are refused:
     // everyone signs in once after this deploy.
     if (typeof payload.sv !== "number" || payload.sv !== user.sessionVersion) return null;
+    // A buyer awaiting approval, or rejected, has no session anywhere, even
+    // one issued before an admin changed their status.
+    if (user.approvalStatus && user.approvalStatus !== "approved") return null;
     return user;
   } catch (e: any) {
     if (String(e?.message || "").includes("AUTH_SECRET")) throw e;

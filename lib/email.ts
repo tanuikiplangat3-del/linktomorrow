@@ -407,14 +407,31 @@ export function sendSiteRequestDecision(input: {
 }
 
 /** A new buyer registered -> let the admin desk know. */
-export function sendBuyerSignupAdmin(name: string, email: string) {
+export function sendBuyerSignupAdmin(name: string, email: string, usersLink: string) {
   return send(
     ADMIN_NOTIFY,
-    "New buyer signed up",
+    "New buyer waiting for approval",
     wrap(
-      "New buyer account",
-      `<p>A new buyer just created an account:</p>
-       <p><strong>Name:</strong> ${esc(name)}<br><strong>Email:</strong> ${esc(email)}</p>`
+      "New buyer waiting for approval",
+      `<p>A new buyer signed up and confirmed their email. They cannot sign in until an admin approves them.</p>
+       <p><strong>Name:</strong> ${esc(name)}<br><strong>Email:</strong> ${esc(email)}</p>
+       ${button(usersLink, "Review buyer approvals")}
+       ${fullLink(usersLink)}`
+    )
+  );
+}
+
+/** An admin approved a buyer -> tell them they can sign in now. */
+export function sendBuyerApproved(to: string, name: string, loginLink: string) {
+  return send(
+    to,
+    "Your Link Tomorrow account is approved",
+    wrap(
+      "Your account is approved",
+      `<p>Hi ${esc(name)},</p>
+       <p>Thanks for waiting. The Welcome Tomorrow team has approved your buyer account on Link Tomorrow, so you can sign in now.</p>
+       ${button(loginLink, "Sign in")}
+       ${fullLink(loginLink)}`
     )
   );
 }
