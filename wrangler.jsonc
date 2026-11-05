@@ -25,15 +25,17 @@
       "localConnectionString": "postgresql://postgres:local@localhost:55432/lt"
     }
   ],
-  // The test address (linktomorrow.<account>.workers.dev) stays on until the
-  // switch-over is confirmed.
+  // The test address https://linktomorrow.cosmas-569.workers.dev/linktomorrow
+  // stays on for checks. It uses the same live database.
   "workers_dev": true,
-  // CUTOVER: the live address. Empty until the switch from AWS.
-  "routes": [],
-  // CUTOVER: background jobs. Empty while testing, because the test copy uses
-  // the live database and the AWS server is still running the same jobs.
-  // When switching over, set to ["*/5 * * * *", "17 */6 * * *"] (see worker.ts).
-  "triggers": { "crons": [] },
+  // The live address (switched from AWS on cutover, Nov 2026). Only the
+  // /linktomorrow path: everything else on tools.welcometomorrow.io is untouched.
+  "routes": [
+    { "pattern": "tools.welcometomorrow.io/linktomorrow*", "zone_name": "welcometomorrow.io" }
+  ],
+  // Background jobs (see worker.ts): turnaround auto-cancel every 5 minutes,
+  // Domain Rating refresh every 6 hours. These replace the AWS in-app timers.
+  "triggers": { "crons": ["*/5 * * * *", "17 */6 * * *"] },
   // Runs the Worker close to the database (Supabase, Ireland) rather than next
   // to each visitor, because most pages make several database queries.
   "placement": { "mode": "smart" },
