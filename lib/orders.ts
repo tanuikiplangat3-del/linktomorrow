@@ -74,7 +74,7 @@ export type CancelResult = {
  */
 export async function cancelFundedOrder(
   orderId: number,
-  opts: { by: string; reason: string }
+  opts: { by: string; reason: string; dueBefore?: Date }
 ): Promise<CancelResult> {
   return prisma.$transaction(async (tx) => {
     // Read inside the transaction, before the guard, so refundedCents can be
@@ -83,7 +83,14 @@ export async function cancelFundedOrder(
     if (!existing) return null;
 
     const changed = await tx.order.updateMany({
-      where: { id: orderId, status: { in: ORDER_IN_FLIGHT as unknown as string[] } },
+      where: {
+        id: orderId,
+        status: { in: ORDER_IN_FLIGHT as unknown as string[] },
+        // The turnaround sweeper passes this, so an order an admin extended in
+        // the moment between the sweeper reading it and cancelling it is left
+        // alone: its deadline is no longer in the past.
+        ...(opts.dueBefore ? { dueAt: { lt: opts.dueBefore } } : {}),
+      },
       data: {
         status: "cancelled",
         cancelReason: opts.reason.slice(0, 1000),
@@ -118,4 +125,52 @@ export async function cancelFundedOrder(
 
     return { orderId, refundedCents: order.amountCents, buyerId: order.buyerId };
   });
+}
+
+/**
+ * Order lists never show cancelled orders (asked by Cosmas 5 Nov 2026). The
+ * rows stay in the database: refunds and wallet history point at them, and the
+ * order page still opens from a link in an email.
+ */
+export const NOT_CANCELLED = { not: "cancelled" } as const;
+
+/** Under this much time left, Admin -> Orders flags an order as about to auto-cancel. */
+export const ENDING_SOON_MS = 48 * 3600_000;
+
+/** The most an admin can add in one go. Press again for more. */
+export const MAX_EXTEND_DAYS = 60;
+
+export type ExtendResult =
+  | { kind: "extended"; dueAt: Date; turnaroundDays: number }
+  | { kind: "not_open" }      // cancelled, live, completed or unpaid
+  | { kind: "no_deadline" }   // buyer-requested site, or funded before deadlines existed
+  | { kind: "changed" };      // the deadline moved under us; try again
+
+/**
+ * Give an in-flight order more time before the turnaround sweeper cancels it.
+ *
+ * The days are added to the current deadline, or to now if the deadline has
+ * already passed (the sweeper runs every five minutes, so an order can sit a
+ * few minutes overdue). turnaroundDays goes up by the same number, so the order
+ * page, the publisher page and any later cancellation reason all show the
+ * turnaround the order now actually has.
+ *
+ * Guarded on the deadline still being the one we read, so two admins pressing
+ * at once cannot stack, and a cancellation that won the race is never undone.
+ */
+export async function extendOrderDeadline(orderId: number, days: number): Promise<ExtendResult> {
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order || !(ORDER_IN_FLIGHT as readonly string[]).includes(order.status)) return { kind: "not_open" };
+  if (!order.dueAt) return { kind: "no_deadline" };
+
+  const base = Math.max(order.dueAt.getTime(), Date.now());
+  const dueAt = new Date(base + days * 86400_000);
+  const turnaroundDays = (order.turnaroundDays || 0) + days;
+
+  const changed = await prisma.order.updateMany({
+    where: { id: orderId, status: { in: ORDER_IN_FLIGHT as unknown as string[] }, dueAt: order.dueAt },
+    data: { dueAt, turnaroundDays },
+  });
+  if (changed.count === 0) return { kind: "changed" };
+  return { kind: "extended", dueAt, turnaroundDays };
 }

@@ -47,8 +47,8 @@ export async function cancelExpiredOrders(): Promise<number> {
   for (const order of expired) {
     const days = order.turnaroundDays;
     const reason = `Turnaround time of ${days} day${days === 1 ? "" : "s"} expired before the link went live.`;
-    const res = await cancelFundedOrder(order.id, { by: CANCELLED_BY_SYSTEM, reason });
-    if (!res) continue; // someone else cancelled it first
+    const res = await cancelFundedOrder(order.id, { by: CANCELLED_BY_SYSTEM, reason, dueBefore: now });
+    if (!res) continue; // someone else cancelled it first, or an admin extended it
     cancelled++;
     console.log(
       `[orders] auto-cancelled #${order.id} (${order.listing.domain}) - turnaround expired, refunded ${res.refundedCents}c`

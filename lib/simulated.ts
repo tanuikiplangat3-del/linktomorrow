@@ -109,8 +109,23 @@ export async function removeSimulatedAccount(userId: number): Promise<RemoveResu
   return { kind: "retired", name: user.name, demoted, completed };
 }
 
-/** Orders that represent real spending. A cancelled order was refunded. */
-const REAL_ORDERS = { not: "cancelled" };
+/**
+ * Orders that represent real spending: the money left the balance. Before
+ * 5 Nov 2026 this was "anything not cancelled", which also counted orders
+ * still awaiting payment, so "Spent" could include money never taken.
+ */
+const PAID_STATUSES = ["funded", "in_progress", "live", "completed"];
+
+/** One paid order, for the per-account list on Admin -> Simulated accounts. */
+export type SimulatedOrderLine = {
+  id: number;
+  domain: string;
+  amountCents: number;
+  payoutCents: number;
+  status: string;
+  publisherPaid: boolean;
+  createdAt: Date;
+};
 
 /**
  * Stripe's own cost on a card deposit, roughly 2.9% + $0.30. Not charged here,
@@ -133,6 +148,11 @@ export type SimulatedAccountRow = {
   buyerValueCents: number;
   publisherCostCents: number;
   publisherPaidCents: number;
+  publisherOwedCents: number;
+  /** Given back to the balance by cancelled orders. Not counted as spent. */
+  refundedCents: number;
+  /** Paid orders only, newest first. Cancelled and unpaid orders are not listed. */
+  orderLines: SimulatedOrderLine[];
   createdAt: Date;
   /** Deleted, kept only because it has completed orders. Counted, not listed. */
   retired: boolean;
@@ -148,6 +168,7 @@ export type SimulatedReport = {
   feeCents: number;          // service fee withheld
   netCents: number;          // what landed on the balances
   balanceLeftCents: number;  // still unspent
+  refundedCents: number;     // returned by cancelled orders
   orders: number;
   buyerValueCents: number;      // what these orders would have cost a real buyer
   publisherCostCents: number;   // real money owed to publishers
@@ -174,6 +195,7 @@ export async function simulatedReport(): Promise<SimulatedReport> {
     feeCents: 0,
     netCents: 0,
     balanceLeftCents: 0,
+    refundedCents: 0,
     orders: 0,
     buyerValueCents: 0,
     publisherCostCents: 0,
@@ -190,14 +212,21 @@ export async function simulatedReport(): Promise<SimulatedReport> {
       select: { userId: true, grossCents: true, feeCents: true, netCents: true },
     }),
     prisma.order.findMany({
-      where: { buyerId: { in: ids }, status: REAL_ORDERS },
-      select: { id: true, buyerId: true, amountCents: true, payoutCents: true, publisherPaid: true, status: true },
+      where: { buyerId: { in: ids }, status: { in: [...PAID_STATUSES, "cancelled"] } },
+      select: {
+        id: true, buyerId: true, amountCents: true, payoutCents: true, publisherPaid: true,
+        status: true, refundedCents: true, createdAt: true, listing: { select: { domain: true } },
+      },
+      orderBy: { createdAt: "desc" },
     }),
   ]);
 
   const rows: SimulatedAccountRow[] = users.map((u) => {
     const mine = credits.filter((c) => c.userId === u.id);
-    const myOrders = orders.filter((o) => o.buyerId === u.id);
+    const all = orders.filter((o) => o.buyerId === u.id);
+    const myOrders = all.filter((o) => PAID_STATUSES.includes(o.status));
+    const publisherCost = myOrders.reduce((s, o) => s + o.payoutCents, 0);
+    const publisherPaid = myOrders.filter((o) => o.publisherPaid).reduce((s, o) => s + o.payoutCents, 0);
     return {
       ...u,
       retired: isRetiredEmail(u.email),
@@ -208,8 +237,19 @@ export async function simulatedReport(): Promise<SimulatedReport> {
       netCents: mine.reduce((s, c) => s + c.netCents, 0),
       orders: myOrders.length,
       buyerValueCents: myOrders.reduce((s, o) => s + o.amountCents, 0),
-      publisherCostCents: myOrders.reduce((s, o) => s + o.payoutCents, 0),
-      publisherPaidCents: myOrders.filter((o) => o.publisherPaid).reduce((s, o) => s + o.payoutCents, 0),
+      publisherCostCents: publisherCost,
+      publisherPaidCents: publisherPaid,
+      publisherOwedCents: publisherCost - publisherPaid,
+      refundedCents: all.filter((o) => o.status === "cancelled").reduce((s, o) => s + o.refundedCents, 0),
+      orderLines: myOrders.map((o) => ({
+        id: o.id,
+        domain: o.listing.domain,
+        amountCents: o.amountCents,
+        payoutCents: o.payoutCents,
+        status: o.status,
+        publisherPaid: o.publisherPaid,
+        createdAt: o.createdAt,
+      })),
     };
   });
 
@@ -226,6 +266,7 @@ export async function simulatedReport(): Promise<SimulatedReport> {
     feeCents: sum((r) => r.feeCents),
     netCents: sum((r) => r.netCents),
     balanceLeftCents: sum((r) => r.balanceCents),
+    refundedCents: sum((r) => r.refundedCents),
     orders: sum((r) => r.orders),
     buyerValueCents,
     publisherCostCents,

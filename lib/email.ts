@@ -690,6 +690,48 @@ export async function sendOrderCancelledEmails(input: {
 }
 
 /**
+ * An admin gave an order more time (5 Nov 2026). The publisher needs the new
+ * date; the buyer sees a countdown on the order page, so they are told too.
+ */
+export async function sendOrderExtendedEmails(input: {
+  buyerEmail?: string | null;
+  publisherEmail?: string | null;
+  domain: string;
+  orderId: number;
+  days: number;
+  dueAt: Date;
+}) {
+  const { buyerEmail, publisherEmail, domain, orderId, days, dueAt } = input;
+  const more = `${days} more day${days === 1 ? "" : "s"}`;
+  if (publisherEmail) {
+    await send(
+      publisherEmail,
+      `Order #${orderId} on ${domain}: new deadline ${longDate(dueAt)}`,
+      wrap(
+        "You have more time on this order",
+        `<p>We have given order <strong>#${orderId}</strong> on <strong>${esc(domain)}</strong>
+            ${more}.</p>
+         <p>Please publish the article and send us the live URL by <strong>${longDate(dueAt)}</strong>.
+            Everything else about the order stays the same.</p>`
+      )
+    );
+  }
+  if (buyerEmail) {
+    await send(
+      buyerEmail,
+      `Order #${orderId} on ${domain}: publishing date moved to ${longDate(dueAt)}`,
+      wrap(
+        "Your order has a new publishing date",
+        `<p>We have given the publisher of <strong>${esc(domain)}</strong> ${more} on order
+            <strong>#${orderId}</strong>. The new date is <strong>${longDate(dueAt)}</strong>.</p>
+         <p>Your money stays on hold for the order. If the link is not live by the new date, the
+            order is cancelled and the full amount goes back to your balance, as before.</p>`
+      )
+    );
+  }
+}
+
+/**
  * The buyer gets the publisher sign-up link to forward on.
  *
  * It goes to the BUYER, not to the publisher directly: the buyer is the one
