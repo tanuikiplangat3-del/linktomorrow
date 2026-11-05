@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole, hashPassword } from "@/lib/auth";
 import { passwordProblem } from "@/lib/password";
 import { centsFromUsd, money } from "@/lib/money";
-import { splitCredit, removeSimulatedAccount, simulatedRemoveRedirect } from "@/lib/simulated";
+import { splitCredit, removeSimulatedAccount, simulatedRemoveRedirect, isRetiredEmail } from "@/lib/simulated";
 
 const q = (s: string) => encodeURIComponent(s);
 const back = "/admin/simulated";
@@ -154,4 +154,39 @@ export async function deleteSimulatedAction(formData: FormData) {
   revalidatePath(back);
   revalidatePath("/admin/users");
   redirect(simulatedRemoveRedirect(back, res));
+}
+
+/**
+ * Set a new password on a simulated account (5 Nov 2026).
+ *
+ * The admin types it on Admin -> Simulated accounts, so it never travels
+ * through chat or email. Same rules as any new password. Every open session on
+ * the account is ended, as a password reset does. The audit log records that
+ * it happened; formSummary() leaves out the password fields themselves.
+ *
+ * Scoped to simulated accounts on purpose: posting this form by hand must never
+ * be able to take over a real buyer, a publisher or an admin.
+ */
+export async function setSimulatedPasswordAction(formData: FormData) {
+  const admin = await requireRole("admin");
+  const userId = parseInt(String(formData.get("userId") || "0")) || 0;
+  const password = String(formData.get("password") || "");
+  const confirm = String(formData.get("confirmPassword") || "");
+
+  const user = await prisma.user.findFirst({ where: { id: userId, isSimulated: true } });
+  if (!user || isRetiredEmail(user.email)) redirect(`${back}?error=${q("That is not a simulated account.")}`);
+  const problem = passwordProblem(password);
+  if (problem) redirect(`${back}?error=${q(user!.name + ": " + problem)}`);
+  if (password !== confirm) redirect(`${back}?error=${q(user!.name + ": both passwords must match.")}`);
+
+  await prisma.user.update({
+    where: { id: user!.id },
+    data: { passwordHash: await hashPassword(password), sessionVersion: { increment: 1 } },
+  });
+  await audit(admin, "setSimulatedPasswordAction", `user:${user!.id} ${user!.email}`, "password changed");
+
+  revalidatePath(back);
+  redirect(
+    `${back}?success=${q(`New password set for ${user!.name}. Sign in as ${user!.email} with it. Anyone signed in to that account has been signed out.`)}`
+  );
 }

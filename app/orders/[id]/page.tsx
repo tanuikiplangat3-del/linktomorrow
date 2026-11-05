@@ -7,6 +7,7 @@ import { money } from "@/lib/money";
 import { StatusBadge, Flash } from "@/components/ui";
 import { payFromWalletAction, payWithStripeAction, submitLiveAction, confirmLiveAction, cancelOrderAction, confirmReceiptAction, buyerSubmitLiveAction, publisherRejectOrderAction, adminCancelOrderAction } from "@/app/actions/orders";
 import Countdown from "@/components/Countdown";
+import ExtendOrderForm from "@/components/ExtendOrderForm";
 import { MARKUP_REQUESTED } from "@/lib/money";
 import { stripeEnabled } from "@/lib/stripe";
 import { contentTypeLabel } from "@/lib/data";
@@ -249,6 +250,21 @@ export default async function OrderPage(
               </label>
               <button className="btn-danger" type="submit">Reject {kindLower} &amp; refund buyer</button>
             </form>
+          </details>
+        </div>
+      )}
+
+      {isAdmin && inFlight && order!.dueAt && (
+        <div className="card mt-5 border-white/10">
+          <details>
+            <summary className="cursor-pointer list-none text-sm font-semibold text-white/80">
+              Admin: give the publisher more time &rarr;
+            </summary>
+            <p className="muted mb-4 mt-3 text-sm">
+              Adds days to the deadline so the order is not cancelled automatically. The publisher
+              and the buyer are emailed the new date.
+            </p>
+            <ExtendOrderForm orderId={order!.id} back="order" />
           </details>
         </div>
       )}

@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { money } from "@/lib/money";
 import { Flash, StatusBadge } from "@/components/ui";
 import { publisherBalance } from "@/lib/withdrawals";
+import { NOT_CANCELLED } from "@/lib/orders";
 
 export const metadata = { title: "Dashboard" };
 
@@ -31,7 +32,7 @@ export default async function DashboardPage(
 
 async function BuyerDash({ userId, balance }: { userId: number; balance: number }) {
   const [total, pending, live, holdAgg, recent] = await Promise.all([
-    prisma.order.count({ where: { buyerId: userId } }),
+    prisma.order.count({ where: { buyerId: userId, status: NOT_CANCELLED } }),
     prisma.order.count({ where: { buyerId: userId, status: { in: ["pending_payment", "funded", "in_progress"] } } }),
     prisma.order.count({ where: { buyerId: userId, status: { in: ["live", "completed"] } } }),
     prisma.order.aggregate({
@@ -39,7 +40,7 @@ async function BuyerDash({ userId, balance }: { userId: number; balance: number 
       where: { buyerId: userId, publisherPaid: false, status: { in: ["funded", "in_progress", "live"] } },
     }),
     prisma.order.findMany({
-      where: { buyerId: userId },
+      where: { buyerId: userId, status: NOT_CANCELLED },
       include: { listing: true },
       orderBy: { createdAt: "desc" },
       take: 8,
@@ -156,7 +157,7 @@ async function AdminDash() {
     prisma.user.count({ where: { role: "buyer" } }),
     prisma.user.count({ where: { role: "publisher" } }),
     prisma.listing.count({ where: { status: "pending" } }),
-    prisma.order.count(),
+    prisma.order.count({ where: { status: NOT_CANCELLED } }),
     prisma.invite.count({ where: { acceptedAt: null } }),
     prisma.publisherApplication.count({ where: { status: "new" } }),
   ]);

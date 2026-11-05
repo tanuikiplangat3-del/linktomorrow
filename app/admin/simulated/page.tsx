@@ -4,7 +4,9 @@ import { money } from "@/lib/money";
 import { Flash } from "@/components/ui";
 import { simulatedReport } from "@/lib/simulated";
 import { PASSWORD_PATTERN, PASSWORD_RULES } from "@/lib/password";
-import { createSimulatedBuyerAction, creditSimulatedAction, deleteSimulatedAction } from "@/app/actions/simulated";
+import { createSimulatedBuyerAction, creditSimulatedAction, deleteSimulatedAction, setSimulatedPasswordAction } from "@/app/actions/simulated";
+import { NewPasswordFields } from "@/components/PasswordField";
+import { StatusBadge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Simulated accounts" };
@@ -67,6 +69,62 @@ export default async function AdminSimulated(
         </div>
       </div>
 
+      {/* ---- Spend by account (5 Nov 2026): each account on its own line ---- */}
+      {r.rows.length > 0 && (
+        <div className="mb-8">
+          <h2 className="h3 mb-3">Spend by account</h2>
+          <div className="card overflow-x-auto">
+            <table className="table-wt">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th className="text-right">Credited</th>
+                  <th className="text-right">Spent</th>
+                  <th className="text-right">Orders</th>
+                  <th className="text-right">Refunded</th>
+                  <th className="text-right">Balance left</th>
+                  <th className="text-right">Real cost to us</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.rows.map((a) => (
+                  <tr key={a.id}>
+                    <td>
+                      {a.retired ? (
+                        <span className="muted">{a.name}</span>
+                      ) : (
+                        <a href={`#account-${a.id}`} className="font-semibold text-wt-green hover:underline">{a.name}</a>
+                      )}
+                    </td>
+                    <td className="text-right tabular-nums">{money(a.grossCents)}</td>
+                    <td className="text-right font-bold tabular-nums">{money(a.buyerValueCents)}</td>
+                    <td className="text-right tabular-nums">{a.orders}</td>
+                    <td className="muted text-right tabular-nums">{money(a.refundedCents)}</td>
+                    <td className="text-right tabular-nums text-wt-green">{money(a.balanceCents)}</td>
+                    <td className="text-right tabular-nums text-red-300">{money(a.publisherCostCents)}</td>
+                  </tr>
+                ))}
+                {r.rows.length > 1 && (
+                  <tr className="font-bold">
+                    <td>All accounts</td>
+                    <td className="text-right tabular-nums">{money(r.grossCents)}</td>
+                    <td className="text-right tabular-nums">{money(r.buyerValueCents)}</td>
+                    <td className="text-right tabular-nums">{r.orders}</td>
+                    <td className="text-right tabular-nums">{money(r.refundedCents)}</td>
+                    <td className="text-right tabular-nums text-wt-green">{money(r.balanceLeftCents)}</td>
+                    <td className="text-right tabular-nums text-red-300">{money(r.publisherCostCents)}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="muted mt-2 text-xs">
+            Spent counts paid orders only. Orders not yet paid for are not counted, and cancelled
+            orders are not counted because the money went back to the balance (shown as Refunded).
+          </p>
+        </div>
+      )}
+
       <div className="card mb-8">
         <h2 className="h3 mb-2">What these numbers mean</h2>
         <ul className="muted space-y-2 text-sm">
@@ -106,7 +164,7 @@ export default async function AdminSimulated(
       ) : (
         <div className="mb-8 grid gap-5">
           {live.map((a) => (
-            <div key={a.id} className="card">
+            <div key={a.id} id={`account-${a.id}`} className="card scroll-mt-24">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-lg font-bold">{a.name}</p>
@@ -121,24 +179,66 @@ export default async function AdminSimulated(
                 </div>
               </div>
 
-              <div className="mb-4 grid gap-4 rounded-md border border-wt-border bg-white/5 p-4 sm:grid-cols-4">
+              <div className="mb-4 grid gap-4 rounded-md border border-wt-border bg-white/5 p-4 sm:grid-cols-3 lg:grid-cols-6">
                 <div>
                   <p className="muted text-xs">Credited (gross)</p>
                   <p className="text-lg font-bold">{money(a.grossCents)}</p>
+                  <p className="muted text-xs">{money(a.netCents)} after the fee</p>
                 </div>
                 <div>
-                  <p className="muted text-xs">Orders</p>
-                  <p className="text-lg font-bold">{a.orders}</p>
-                </div>
-                <div>
-                  <p className="muted text-xs">Spent</p>
+                  <p className="muted text-xs">Spent on placements</p>
                   <p className="text-lg font-bold">{money(a.buyerValueCents)}</p>
+                  <p className="muted text-xs">{a.orders} paid order{a.orders === 1 ? "" : "s"}</p>
+                </div>
+                <div>
+                  <p className="muted text-xs">Refunded</p>
+                  <p className="text-lg font-bold">{money(a.refundedCents)}</p>
+                  <p className="muted text-xs">from cancelled orders</p>
+                </div>
+                <div>
+                  <p className="muted text-xs">Balance left</p>
+                  <p className="text-lg font-bold text-wt-green">{money(a.balanceCents)}</p>
                 </div>
                 <div>
                   <p className="muted text-xs">Real cost to us</p>
                   <p className="text-lg font-bold text-red-300">{money(a.publisherCostCents)}</p>
+                  <p className="muted text-xs">{money(a.publisherPaidCents)} sent, {money(a.publisherOwedCents)} to send</p>
+                </div>
+                <div>
+                  <p className="muted text-xs">Margin not charged</p>
+                  <p className="text-lg font-bold text-wt-green">{money(a.buyerValueCents - a.publisherCostCents)}</p>
                 </div>
               </div>
+
+              {a.orderLines.length > 0 && (
+                <details className="mb-4">
+                  <summary className="cursor-pointer list-none text-sm font-semibold text-wt-green">
+                    Orders on this account ({a.orderLines.length}) &rarr;
+                  </summary>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="table-wt">
+                      <thead>
+                        <tr><th>#</th><th>Site</th><th>Date</th><th className="text-right">Spent</th><th className="text-right">Publisher gets</th><th>Status</th></tr>
+                      </thead>
+                      <tbody>
+                        {a.orderLines.map((o) => (
+                          <tr key={o.id}>
+                            <td><Link href={`/orders/${o.id}`} className="text-wt-green">{o.id}</Link></td>
+                            <td className="font-semibold">{o.domain}</td>
+                            <td className="muted whitespace-nowrap">{o.createdAt.toISOString().slice(0, 10)}</td>
+                            <td className="text-right tabular-nums">{money(o.amountCents)}</td>
+                            <td className="text-right tabular-nums text-red-300">
+                              {money(o.payoutCents)}
+                              <span className="muted block text-xs">{o.publisherPaid ? "sent" : "to send"}</span>
+                            </td>
+                            <td><StatusBadge status={o.status} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
 
               <form action={creditSimulatedAction} className="flex flex-wrap items-end gap-3">
                 <input type="hidden" name="userId" value={a.id} />
@@ -155,6 +255,20 @@ export default async function AdminSimulated(
               <p className="muted mt-2 text-xs">
                 The 5% service fee comes off, the same as a card deposit.
               </p>
+
+              <details className="mt-4 border-t border-wt-border pt-4">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-white/80">
+                  Set a new password &rarr;
+                </summary>
+                <form action={setSimulatedPasswordAction} className="mt-3 max-w-md">
+                  <input type="hidden" name="userId" value={a.id} />
+                  <p className="muted mb-3 text-sm">
+                    Replaces the password for {a.email}. Anyone signed in to this account is signed out.
+                  </p>
+                  <NewPasswordFields label="New password" confirmLabel="Type it again" />
+                  <button className="btn-primary btn-sm" type="submit">Save new password</button>
+                </form>
+              </details>
 
               <details className="mt-4 border-t border-wt-border pt-4">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-white/80">

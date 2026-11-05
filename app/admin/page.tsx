@@ -5,6 +5,7 @@ import { requireRole } from "@/lib/auth";
 import { Flash } from "@/components/ui";
 import { sendTestEmailAction } from "@/app/actions/admin";
 import { countConflicts } from "@/lib/duplicates";
+import { NOT_CANCELLED, ENDING_SOON_MS, ORDER_IN_FLIGHT } from "@/lib/orders";
 
 export default async function AdminHome(
   props: {
@@ -17,7 +18,7 @@ export default async function AdminHome(
     prisma.user.count(),
     prisma.user.count({ where: { role: "publisher" } }),
     prisma.listing.count({ where: { status: "pending" } }),
-    prisma.order.count(),
+    prisma.order.count({ where: { status: NOT_CANCELLED } }),
     prisma.order.count({ where: { status: "funded" } }),
     prisma.invite.count({ where: { acceptedAt: null } }),
   ]);
@@ -27,12 +28,19 @@ export default async function AdminHome(
   const payoutReviews = await prisma.user.count({ where: { role: "publisher", payStatus: "pending" } });
   const withdrawals = await prisma.withdrawal.count({ where: { status: "pending" } });
   const buyerApprovals = await prisma.user.count({ where: { role: "buyer", approvalStatus: "pending" } });
+  const endingSoon = await prisma.order.count({
+    where: {
+      status: { in: ORDER_IN_FLIGHT as unknown as string[] },
+      dueAt: { lt: new Date(Date.now() + ENDING_SOON_MS) },
+    },
+  });
   const auditToday = await prisma.adminAudit.count({ where: { createdAt: { gte: new Date(Date.now() - 86400_000) } } });
 
   const cards = [
     { href: "/admin/listings", label: "Review listings", value: pending, hint: "pending" },
     { href: "/admin/conflicts", label: "Conflicts", value: conflicts, hint: "duplicate domains" },
     { href: "/admin/orders", label: "Orders", value: orders, hint: `${funded} funded` },
+    { href: "/admin/orders", label: "About to be cancelled", value: endingSoon, hint: "under 48 hours left" },
     { href: "/admin/site-requests", label: "Site requests", value: siteRequests, hint: "awaiting review" },
     { href: "/admin/invites", label: "Publisher invites", value: invites, hint: "open" },
     { href: "/admin/users", label: "Buyer approvals", value: buyerApprovals, hint: "waiting to sign in" },
@@ -50,7 +58,7 @@ export default async function AdminHome(
       <Flash searchParams={searchParams} />
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (
-          <Link key={c.href} href={c.href} className="card hover:border-wt-green/50">
+          <Link key={c.label} href={c.href} className="card hover:border-wt-green/50">
             <p className="muted text-sm">{c.label}</p>
             <p className="text-3xl font-bold">{c.value}</p>
             <p className="muted text-xs">{c.hint}</p>

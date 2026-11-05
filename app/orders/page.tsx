@@ -6,6 +6,7 @@ import { money } from "@/lib/money";
 import { one } from "@/lib/util";
 import { StatusBadge, Flash, EmptyState } from "@/components/ui";
 import Countdown from "@/components/Countdown";
+import { NOT_CANCELLED } from "@/lib/orders";
 
 export default async function OrdersPage(
   props: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }
@@ -21,7 +22,9 @@ export default async function OrdersPage(
       ? { listing: { publisherId: user.id } }
       : {};
 
-  const filter: any = {};
+  // Cancelled orders are never listed, for buyers, publishers or admins
+  // (5 Nov 2026). Both filters below only name open statuses anyway.
+  const filter: any = { status: NOT_CANCELLED };
   if (f === "pending") filter.status = { in: ["pending_payment", "funded", "in_progress"] };
   if (f === "live") filter.status = { in: ["live", "completed"] };
   const where = { ...roleWhere, ...filter };

@@ -11,11 +11,13 @@ import { isContentType } from "@/lib/data";
 import { audit, formSummary } from "@/lib/audit";
 import { safeHttpUrl, IMAGE_TYPES, DOCUMENT_TYPES } from "@/lib/safe-url";
 import { createCheckout, stripeEnabled } from "@/lib/stripe";
-import { emailEnabled, sendOrderNotice, sendLiveUrlAdmin, sendOrderConfirmedEmails, sendOrderCancelledEmails } from "@/lib/email";
+import { emailEnabled, sendOrderNotice, sendLiveUrlAdmin, sendOrderConfirmedEmails, sendOrderCancelledEmails, sendOrderExtendedEmails } from "@/lib/email";
 import { confirmReceiptStep, submitLiveStep, notifyNewOrder } from "@/lib/order-steps";
 import {
   cancelFundedOrder,
   dueAtFrom,
+  extendOrderDeadline,
+  MAX_EXTEND_DAYS,
   CANCELLED_BY_ADMIN,
   CANCELLED_BY_BUYER,
   CANCELLED_BY_PUBLISHER,
@@ -423,6 +425,61 @@ export async function adminCancelOrderAction(formData: FormData) {
   revalidatePath("/admin/orders");
   revalidatePath("/orders");
   redirect(`/orders/${orderId}?success=${q(`Order cancelled and ${res!.refundedCents / 100} USD refunded to the buyer's balance.`)}`);
+}
+
+/**
+ * Admin gives an in-flight order more days before the turnaround sweeper
+ * cancels it (5 Nov 2026). The publisher and the buyer are emailed the new
+ * date. Posted from Admin -> Orders and from the order page; "back" says which
+ * one to return to, and only those two values are accepted.
+ */
+export async function extendOrderAction(formData: FormData) {
+  const user = await requireRole("admin");
+  await audit(user, "extendOrderAction", null, formSummary(formData));
+  const orderId = parseInt(String(formData.get("orderId") || "0")) || 0;
+  const days = parseInt(String(formData.get("days") || "0")) || 0;
+  const back = formData.get("back") === "order" ? `/orders/${orderId}` : "/admin/orders";
+
+  if (days < 1 || days > MAX_EXTEND_DAYS) {
+    redirect(`${back}?error=${q(`Enter a number of days from 1 to ${MAX_EXTEND_DAYS}.`)}`);
+  }
+  const res = await extendOrderDeadline(orderId, days);
+  if (res.kind === "not_open") {
+    redirect(`${back}?error=${q(`Order #${orderId} is no longer waiting on the publisher (it is cancelled, live or completed), so it cannot be extended.`)}`);
+  }
+  if (res.kind === "no_deadline") {
+    redirect(`${back}?error=${q(`Order #${orderId} has no turnaround deadline, so it will never be cancelled automatically. Nothing to extend.`)}`);
+  }
+  if (res.kind === "changed") {
+    redirect(`${back}?error=${q(`Order #${orderId} changed just now. Please try again.`)}`);
+  }
+  if (res.kind !== "extended") return;
+
+  if (emailEnabled()) {
+    try {
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { listing: { include: { publisher: true } }, buyer: true },
+      });
+      if (order) {
+        await sendOrderExtendedEmails({
+          buyerEmail: order.buyer?.email,
+          publisherEmail: order.listing.publisher?.email,
+          domain: order.listing.domain,
+          orderId,
+          days,
+          dueAt: res.dueAt,
+        });
+      }
+    } catch (e: any) {
+      // The extension has happened. A failed email must not hide that.
+      console.error(`[orders] extension email for #${orderId} failed: ${e?.message || e}`);
+    }
+  }
+  revalidatePath("/admin/orders");
+  revalidatePath(`/orders/${orderId}`);
+  const when = res.dueAt.toLocaleString("en-GB", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  redirect(`${back}?success=${q(`Order #${orderId} extended by ${days} day${days === 1 ? "" : "s"}. New deadline ${when} UTC.` + (emailEnabled() ? " The publisher and the buyer have been emailed." : ""))}`);
 }
 
 /** Order completed -> tell the publisher and the admin desk (starts the 72h clock). */
