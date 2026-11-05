@@ -7,7 +7,7 @@ import { markPublisherPaidAction } from "@/app/actions/admin";
 import { adminConfirmLiveAction } from "@/app/actions/orders";
 import Countdown from "@/components/Countdown";
 import ExtendOrderForm from "@/components/ExtendOrderForm";
-import { ENDING_SOON_MS } from "@/lib/orders";
+import { ENDING_SOON_MS, LIST_OMIT } from "@/lib/orders";
 
 export const metadata = { title: "Orders" };
 
@@ -20,11 +20,13 @@ export default async function AdminOrders(
   const [toPay, inProgress] = await Promise.all([
     prisma.order.findMany({
       where: { publisherPaid: false, status: { in: ["live", "completed"] } },
+      omit: LIST_OMIT,
       include: { listing: { include: { publisher: true } }, buyer: true },
       orderBy: { createdAt: "asc" },
     }),
     prisma.order.findMany({
       where: { status: { in: ["funded", "in_progress"] } },
+      omit: LIST_OMIT,
       include: { listing: { include: { publisher: true } }, buyer: true },
       orderBy: { createdAt: "asc" },
     }),

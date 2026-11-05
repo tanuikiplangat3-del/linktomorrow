@@ -6,7 +6,7 @@ import { money } from "@/lib/money";
 import { one } from "@/lib/util";
 import { StatusBadge, Flash, EmptyState } from "@/components/ui";
 import Countdown from "@/components/Countdown";
-import { NOT_CANCELLED } from "@/lib/orders";
+import { NOT_CANCELLED, LIST_OMIT } from "@/lib/orders";
 
 export default async function OrdersPage(
   props: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }
@@ -31,6 +31,7 @@ export default async function OrdersPage(
 
   const orders = await prisma.order.findMany({
     where,
+    omit: LIST_OMIT,
     include: { listing: true, buyer: true },
     orderBy: { createdAt: "desc" },
     take: 200,

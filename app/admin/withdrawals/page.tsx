@@ -7,6 +7,7 @@ import WithdrawalBadge from "@/components/WithdrawalBadge";
 import { decideWithdrawalAction } from "@/app/actions/withdrawals";
 import { withdrawMethodLabel, WITHDRAWAL_PENDING } from "@/lib/withdrawals";
 import { contentTypeLabel } from "@/lib/data";
+import { LIST_OMIT } from "@/lib/orders";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Withdrawals" };
@@ -38,6 +39,7 @@ export default async function AdminWithdrawals(
   const orders = pending.length
     ? await prisma.order.findMany({
         where: { withdrawalId: { in: pending.map((w) => w.id) } },
+        omit: LIST_OMIT,
         include: { listing: true, buyer: true },
         orderBy: { id: "asc" },
       })

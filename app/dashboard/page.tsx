@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { money } from "@/lib/money";
 import { Flash, StatusBadge } from "@/components/ui";
 import { publisherBalance } from "@/lib/withdrawals";
-import { NOT_CANCELLED } from "@/lib/orders";
+import { NOT_CANCELLED, LIST_OMIT } from "@/lib/orders";
 
 export const metadata = { title: "Dashboard" };
 
@@ -41,6 +41,7 @@ async function BuyerDash({ userId, balance }: { userId: number; balance: number 
     }),
     prisma.order.findMany({
       where: { buyerId: userId, status: NOT_CANCELLED },
+      omit: LIST_OMIT,
       include: { listing: true },
       orderBy: { createdAt: "desc" },
       take: 8,

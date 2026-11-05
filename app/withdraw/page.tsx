@@ -9,6 +9,7 @@ import WithdrawalBadge from "@/components/WithdrawalBadge";
 import { COUNTRIES, contentTypeLabel } from "@/lib/data";
 import { publisherBalance, readyToWithdrawWhere, withdrawMethodLabel } from "@/lib/withdrawals";
 import { requestWithdrawalAction } from "@/app/actions/withdrawals";
+import { LIST_OMIT } from "@/lib/orders";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Withdraw" };
@@ -25,6 +26,7 @@ export default async function WithdrawPage(
     publisherBalance(user.id),
     prisma.order.findMany({
       where: readyToWithdrawWhere(user.id),
+      omit: LIST_OMIT,
       include: { listing: true },
       orderBy: { createdAt: "asc" },
     }),

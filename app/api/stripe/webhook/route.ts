@@ -25,7 +25,9 @@ export async function POST(req: NextRequest) {
 
   let event;
   try {
-    event = stripe.webhooks.constructEvent(body, sig, secret);
+    // Async: on Workers, Stripe verifies the signature with Web Crypto, which has
+    // no synchronous form.
+    event = await stripe.webhooks.constructEventAsync(body, sig, secret);
   } catch (err: any) {
     console.error(`[stripe-webhook] signature check failed: ${err.message}`);
     return NextResponse.json({ error: `Webhook signature failed: ${err.message}` }, { status: 400 });

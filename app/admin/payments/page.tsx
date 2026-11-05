@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { money } from "@/lib/money";
 import { simulatedReport } from "@/lib/simulated";
+import { LIST_OMIT } from "@/lib/orders";
 
 export const metadata = { title: "Payment history" };
 
@@ -22,6 +23,7 @@ export default async function AdminPayments() {
     }),
     prisma.order.findMany({
       where: { publisherPaid: true },
+      omit: LIST_OMIT,
       include: { listing: { include: { publisher: true } } },
       orderBy: { updatedAt: "desc" },
       take: 300,
