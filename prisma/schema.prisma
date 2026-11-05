@@ -8,7 +8,10 @@
 // portable between SQLite and Postgres without changes.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // Cloudflare Workers (Nov 2026): the database is reached through a driver
+  // adapter (lib/prisma.ts), not the native query engine.
+  previewFeatures = ["driverAdapters", "omitApi"]
 }
 
 datasource db {

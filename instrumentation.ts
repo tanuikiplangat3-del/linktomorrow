@@ -1,15 +1,8 @@
-// Runs once when the Next.js server process starts (not during the build).
-// Kicks off the weekly Domain Rating refresh and the turnaround auto-cancel
-// sweep. Both are in-app schedulers - no AWS cron, no public endpoint.
+// Intentionally empty (Cloudflare Workers, Nov 2026).
+//
+// On the old Docker/ECS server this file started two in-app timers: the
+// 5-minute turnaround auto-cancel and the weekly Domain Rating refresh. A
+// Worker has no long-running process, so those jobs now run from Cloudflare
+// Cron Triggers: see worker.ts and app/api/cron/[job]/route.ts.
 
-export async function register() {
-  // Only the Node.js server runtime - never the edge runtime or the build step.
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  // Next.js 16 can load this file while collecting page data during
-  // `next build`. There is no database then, so the schedulers must not start.
-  if (process.env.NEXT_PHASE === "phase-production-build") return;
-  const { startMetricsScheduler } = await import("@/lib/metrics-scheduler");
-  startMetricsScheduler();
-  const { startOrderScheduler } = await import("@/lib/order-scheduler");
-  startOrderScheduler();
-}
+export async function register() {}

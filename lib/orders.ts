@@ -18,6 +18,14 @@
 
 import { prisma } from "@/lib/prisma";
 
+/**
+ * Order columns that hold uploaded files as data URLs (up to ~8 MB each).
+ * Every query that lists orders leaves them out: a Worker has 128 MB of memory,
+ * and a list of orders with their files would run out. Only the order page,
+ * the publisher's email page and the file download load them.
+ */
+export const LIST_OMIT = { articleDocUrl: true, featuredImage: true } as const;
+
 /** Statuses where the buyer's money is held and the publisher still owes work. */
 export const ORDER_IN_FLIGHT = ["funded", "in_progress"] as const;
 

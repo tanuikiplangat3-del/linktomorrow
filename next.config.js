@@ -17,6 +17,9 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Cloudflare Workers (Nov 2026): loaded at run time by the Worker rather than
+  // bundled by Next.js, as the Cloudflare adapter requires for Prisma and pg.
+  serverExternalPackages: ["@prisma/client", ".prisma/client", "@prisma/adapter-pg", "pg"],
   // Served under tools.welcometomorrow.io/linktomorrow (sibling of /ranktomorrow)
   basePath: "/linktomorrow",
   // Self-contained server build for a small Docker image (matches ranktomorrow)

@@ -11,7 +11,7 @@
 // refund one order twice.
 
 import { prisma } from "@/lib/prisma";
-import { cancelFundedOrder, CANCELLED_BY_SYSTEM, ORDER_IN_FLIGHT } from "@/lib/orders";
+import { cancelFundedOrder, CANCELLED_BY_SYSTEM, ORDER_IN_FLIGHT, LIST_OMIT } from "@/lib/orders";
 import { MARKUP_REQUESTED } from "@/lib/money";
 import { emailEnabled, sendOrderCancelledEmails } from "@/lib/email";
 
@@ -38,6 +38,7 @@ export async function cancelExpiredOrders(): Promise<number> {
       // placement that actually ran.
       listing: { markupModel: { not: MARKUP_REQUESTED } },
     },
+    omit: LIST_OMIT,
     include: { listing: { include: { publisher: true } }, buyer: true },
     orderBy: { dueAt: "asc" },
     take: MAX_PER_PASS,

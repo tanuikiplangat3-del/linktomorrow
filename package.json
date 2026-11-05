@@ -2,12 +2,15 @@
   "name": "linktomorrow",
   "version": "1.0.0",
   "private": true,
-  "description": "Link Tomorrow \u2014 Link Building Marketplace",
+  "description": "Link Tomorrow, Link Building Marketplace",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build --webpack",
     "start": "next start",
     "postinstall": "prisma generate",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force"
@@ -16,21 +19,26 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "5.22.0",
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "jose": "^5.9.6",
-    "next": "16.3.6",
+    "next": "16.4.5",
+    "papaparse": "5.7.0",
+    "pg": "8.16.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "read-excel-file": "9.3.10",
     "resend": "^4.0.1",
     "stripe": "^17.4.0",
-    "zod": "^3.23.8",
-    "read-excel-file": "9.3.10",
-    "papaparse": "5.7.0"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "1.20.16",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "24.13.6",
+    "@types/papaparse": "5.5.2",
+    "@types/pg": "8.11.10",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "autoprefixer": "^10.4.20",
@@ -39,7 +47,7 @@
     "tailwindcss": "^3.4.14",
     "tsx": "^4.19.2",
     "typescript": "5.9.3",
-    "@types/papaparse": "5.5.2"
+    "wrangler": "4.158.0"
   },
   "engines": {
     "node": ">=22.0.0"

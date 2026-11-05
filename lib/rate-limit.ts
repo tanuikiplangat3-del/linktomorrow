@@ -38,15 +38,18 @@ export const TOO_MANY = "Too many attempts. Please wait a while and try again.";
 /**
  * The visitor's IP address.
  *
- * The app sits behind the AWS load balancer, which APPENDS the address it saw
- * to X-Forwarded-For. Anything earlier in that header was written by the
- * visitor and can be faked, so only the LAST entry is trusted. If the site is
- * later put behind Cloudflare's proxy, the last entry becomes a Cloudflare
- * address; the per-email limits still hold, and this function is the one place
- * to change.
+ * Since Nov 2026 the app runs on Cloudflare Workers, where Cloudflare sets
+ * CF-Connecting-IP to the visitor's real address and replaces any value a
+ * client sends. That is what is used.
+ *
+ * Fallback (the old AWS setup only): the AWS load balancer APPENDS the address
+ * it saw to X-Forwarded-For; anything earlier was written by the visitor and
+ * can be faked, so only the LAST entry is trusted.
  */
 export async function clientIp(): Promise<string> {
   const h = await headers();
+  const cf = (h.get("cf-connecting-ip") || "").trim();
+  if (cf) return cf;
   const xff = h.get("x-forwarded-for") || "";
   const parts = xff.split(",").map((p) => p.trim()).filter(Boolean);
   return parts[parts.length - 1] || h.get("x-real-ip") || "unknown";

@@ -16,6 +16,11 @@ const RUN_MAX_ITEMS = 500;
 let started = false;
 let running = false;
 
+/** One refresh pass. Exported for the Cloudflare cron (app/api/cron/[job]). */
+export async function runMetricsPass() {
+  return runOnce();
+}
+
 async function runOnce() {
   if (running) return; // never let two passes overlap
   if (!ahrefsEnabled()) return; // no key - nothing to do, and lib/ahrefs already logged it
