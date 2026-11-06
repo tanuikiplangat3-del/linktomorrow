@@ -4,8 +4,14 @@ const key = process.env.STRIPE_SECRET_KEY || "";
 
 export const stripeEnabled = (): boolean => key.length > 0;
 
+// Cloudflare Workers (6 Nov 2026): Stripe must use its fetch-based HTTP client.
+// The default Node client opens sockets the Workers runtime never completes,
+// so "Top up" and "Pay by card" hung and Cloudflare showed error 1101.
 export const stripe: Stripe | null = key
-  ? new Stripe(key, { apiVersion: "2024-11-20.acacia" as Stripe.LatestApiVersion })
+  ? new Stripe(key, {
+      apiVersion: "2024-11-20.acacia" as Stripe.LatestApiVersion,
+      httpClient: Stripe.createFetchHttpClient(),
+    })
   : null;
 
 export const appUrl = (): string =>
